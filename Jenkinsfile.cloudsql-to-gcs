@@ -1,4 +1,4 @@
-// Pipeline 3: Cloud SQL (target_table) → GCS prefix sql-exports/ (feeds Pipeline 4).
+// Pipeline 3: Cloud SQL (target_table) to GCS prefix sql-exports/ (feeds Pipeline 4).
 // Run Pipeline 2 first so target_table contains the rows you intend to export.
 
 pipeline {
@@ -41,5 +41,5 @@ pipeline {
 
 
     }
-    post { success { echo 'P3 done: Cloud SQL → GCS' } failure { echo 'P3 FAILED' } }
+    post { success { echo 'P3 done: Cloud SQL to GCS' } failure { echo 'P3 FAILED' } }
 }

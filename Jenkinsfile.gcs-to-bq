@@ -1,4 +1,4 @@
-// Pipeline 4: latest sql-exports/*.csv → BigQuery destination table (bq-table-dest).
+// Pipeline 4: latest sql-exports/*.csv to BigQuery destination table (bq-table-dest).
 // Pipeline 4 is blocked until Pipeline 3 has produced at least one sql-exports CSV object.
 
 pipeline {
@@ -41,5 +41,5 @@ pipeline {
 
 
     }
-    post { success { echo 'P4 done: GCS → BigQuery' } failure { echo 'P4 FAILED' } }
+    post { success { echo 'P4 done: GCS to BigQuery' } failure { echo 'P4 FAILED' } }
 }

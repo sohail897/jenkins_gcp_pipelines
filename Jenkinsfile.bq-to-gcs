@@ -41,5 +41,5 @@ pipeline {
             }
         }
     }
-    post { success { echo 'P1 done: BigQuery → GCS' } failure { echo 'P1 FAILED' } }
+    post { success { echo 'P1 done: BigQuery to GCS' } failure { echo 'P1 FAILED' } }
 }

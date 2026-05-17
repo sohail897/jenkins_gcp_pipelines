@@ -41,5 +41,5 @@ pipeline {
             }
         }
     }
-    post { success { echo 'P2 done: GCS → Cloud SQL' } failure { echo 'P2 FAILED' } }
+    post { success { echo 'P2 done: GCS to Cloud SQL' } failure { echo 'P2 FAILED' } }
 }
