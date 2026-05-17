@@ -1,0 +1,45 @@
+pipeline {
+    agent { label 'gcp-slave' }
+    stages {
+        stage('Authenticate') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'),
+                    string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'),
+                    string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'),
+                    string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'),
+                    string(credentialsId: 'bq-table-source', variable: 'BQ_TABLE_SOURCE')
+                ]) {
+                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY'
+                }
+            }
+        }
+        stage('Export BQ to GCS') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'),
+                    string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'),
+                    string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'),
+                    string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'),
+                    string(credentialsId: 'bq-table-source', variable: 'BQ_TABLE_SOURCE')
+                ]) {
+                    sh 'bq extract --destination_format CSV ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_SOURCE} gs://${GCS_BUCKET}/bq-exports/export_$(date +%Y%m%d_%H%M%S).csv'
+                }
+            }
+        }
+        stage('Verify GCS export') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'),
+                    string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'),
+                    string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'),
+                    string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'),
+                    string(credentialsId: 'bq-table-source', variable: 'BQ_TABLE_SOURCE')
+                ]) {
+                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && gsutil ls -l gs://${GCS_BUCKET}/bq-exports/'
+                }
+            }
+        }
+    }
+    post { success { echo 'P1 done: BigQuery → GCS' } failure { echo 'P1 FAILED' } }
+}

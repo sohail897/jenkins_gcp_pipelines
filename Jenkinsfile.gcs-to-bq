@@ -1,0 +1,45 @@
+// Pipeline 4: latest sql-exports/*.csv → BigQuery destination table (bq-table-dest).
+// Pipeline 4 is blocked until Pipeline 3 has produced at least one sql-exports CSV object.
+
+pipeline {
+    agent { label 'gcp-slave' }
+
+    stages {
+        stage('Authenticate GCP') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY'
+                }
+            }
+        }
+
+        stage('Identify latest export') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh 'set -euo pipefail; gcloud auth activate-service-account --key-file=$GCP_SA_KEY; LATEST=$(gsutil ls gs://$GCS_BUCKET/sql-exports/*.csv 2>/dev/null | tail -n1 || true); test -n "$LATEST" || { echo "Run Pipeline 3 first: no sql-exports CSV"; exit 2; }; echo "$LATEST" > /tmp/gcs_latest_uri.txt'
+                }
+            }
+        }
+
+        stage('Load CSV into BigQuery') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && LATEST=$(cat /tmp/gcs_latest_uri.txt) && bq load --autodetect --source_format=CSV ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_DEST} "$LATEST"'
+                }
+            }
+        }
+
+        stage('Verify BigQuery') {
+            steps {
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh 'bq query --use_legacy_sql=false --project_id=$BQ_PROJECT "SELECT COUNT(*) AS row_count FROM ${BQ_DATASET}.${BQ_TABLE_DEST}"'
+                }
+            }
+        }
+
+
+
+
+    }
+    post { success { echo 'P4 done: GCS → BigQuery' } failure { echo 'P4 FAILED' } }
+}
