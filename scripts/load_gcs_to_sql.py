@@ -8,6 +8,23 @@ import pandas as pd
 import pymysql
 
 
+def normalize_bigquery_csv_for_mysql(df):
+    """BigQuery TIMESTAMP columns in CSV often end with ' UTC'. MySQL DATETIME rejects that suffix."""
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+
+        def fix_cell(x):
+            if pd.isna(x):
+                return x
+            if isinstance(x, str) and x.endswith(" UTC"):
+                return x[: -len(" UTC")]
+            return x
+
+        df[col] = df[col].map(fix_cell)
+    return df
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Load CSV into MySQL in batches.")
     p.add_argument("--csv-file", required=True)
@@ -28,6 +45,7 @@ def main():
         except Exception as exc:
             print(f"read_csv failed: {exc}", file=sys.stderr)
             sys.exit(1)
+        normalize_bigquery_csv_for_mysql(df)
         if df.empty:
             print("CSV has no rows; nothing to insert.", file=sys.stderr)
             sys.exit(1)
