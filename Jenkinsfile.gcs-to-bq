@@ -16,7 +16,7 @@ pipeline {
         stage('Identify latest export') {
             steps {
                 withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
-                    sh 'set -euo pipefail; gcloud auth activate-service-account --key-file=$GCP_SA_KEY; LATEST=$(gsutil ls gs://$GCS_BUCKET/sql-exports/*.csv 2>/dev/null | tail -n1 || true); test -n "$LATEST" || { echo "Run Pipeline 3 first: no sql-exports CSV"; exit 2; }; echo "$LATEST" > /tmp/gcs_latest_uri.txt'
+                    sh 'bash -lc '\''set -euo pipefail; gcloud auth activate-service-account --key-file=$GCP_SA_KEY; LATEST=$(gsutil ls gs://$GCS_BUCKET/sql-exports/*.csv 2>/dev/null | tail -n1 || true); test -n "$LATEST" || { echo "Run Pipeline 3 first: no sql-exports CSV"; exit 2; }; echo "$LATEST" > /tmp/gcs_latest_uri.txt'\'''
                 }
             }
         }

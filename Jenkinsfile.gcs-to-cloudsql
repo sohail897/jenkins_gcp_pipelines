@@ -12,7 +12,7 @@ pipeline {
         stage('Download from GCS') {
             steps {
                 withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'set -euo pipefail; gcloud auth activate-service-account --key-file=$GCP_SA_KEY; LATEST=$(gsutil ls gs://$GCS_BUCKET/bq-exports/*.csv 2>/dev/null | tail -n1 || true); test -n "$LATEST" || { echo "Run Pipeline 1 first: no bq-exports CSV"; exit 2; }; gsutil cp "$LATEST" /tmp/input.csv'
+                    sh 'bash -lc '\''set -euo pipefail; gcloud auth activate-service-account --key-file=$GCP_SA_KEY; LATEST=$(gsutil ls gs://$GCS_BUCKET/bq-exports/*.csv 2>/dev/null | tail -n1 || true); test -n "$LATEST" || { echo "Run Pipeline 1 first: no bq-exports CSV"; exit 2; }; gsutil cp "$LATEST" /tmp/input.csv'\'''
                 }
             }
         }
