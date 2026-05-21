@@ -38,7 +38,7 @@ echo "$LATEST" > /tmp/gcs_latest_uri.txt
         stage('Verify BigQuery') {
             steps {
                 withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
-                    sh 'bq query --use_legacy_sql=false --project_id=$BQ_PROJECT "SELECT COUNT(*) AS row_count FROM ${BQ_DATASET}.${BQ_TABLE_DEST}"'
+                    sh 'bq show --format=prettyjson ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_DEST} | grep -E "\"numRows\"|\"type\"|\"tableReference\""'
                 }
             }
         }
