@@ -50,9 +50,18 @@ WORKLOAD_ID=orders     ->  p1, then p2, then p3, then p4   (can overlap in time 
 3. Script Path: `Jenkinsfile.parallel-orchestrator`
 4. Build with Parameters:
 
-   `WORKLOAD_IDS=customers,orders`
+   | Parameter | Example | Meaning |
+   |-----------|---------|---------|
+   | `WORKLOAD_IDS` | `run_a,run_b` | How many parallel chains (names you choose) |
+   | `PIPELINES_TO_RUN` | `P1,P2,P3,P4` | Which Jenkins jobs to run (subset allowed) |
 
-This runs two full chains **in parallel** (each chain sequential internally).
+Examples:
+
+- Full parallel: `WORKLOAD_IDS=run_a,run_b` and `PIPELINES_TO_RUN=P1,P2,P3,P4`
+- Only export from BQ for two workloads: `PIPELINES_TO_RUN=P1`
+- Only load GCS to BQ (after P3 already ran): `PIPELINES_TO_RUN=P4`
+
+This runs chains **in parallel**; steps inside each chain run **in the order** you list (e.g. P1 then P2, never P2 before P1 in the same chain).
 
 ### Different BQ tables per workload
 

@@ -1,4 +1,4 @@
-// Run multiple isolated P1->P2->P3->P4 chains in parallel (one WORKLOAD_ID per chain).
+// Run one or more pipeline jobs per WORKLOAD_ID. Chains run in parallel; steps inside a chain run in order.
 // Requires Pipeline: Build Step plugin and jobs: p1-bq-to-gcs, p2-gcs-to-cloudsql, p3-cloudsql-to-gcs, p4-gcs-to-bq
 
 pipeline {
@@ -7,8 +7,13 @@ pipeline {
     parameters {
         string(
             name: 'WORKLOAD_IDS',
-            defaultValue: 'customers,orders',
-            description: 'Comma-separated workload IDs (letters, numbers, underscore). Each runs P1->P4 in parallel.'
+            defaultValue: 'run_a,run_b',
+            description: 'Comma-separated workload IDs (letters, numbers, underscore). One full chain per ID.'
+        )
+        string(
+            name: 'PIPELINES_TO_RUN',
+            defaultValue: 'P1,P2,P3,P4',
+            description: 'Comma-separated steps to run: P1, P2, P3, P4 (any subset, in this order). Example: P1,P2 or P3,P4'
         )
     }
 
@@ -16,27 +21,38 @@ pipeline {
         stage('Parallel data chains') {
             steps {
                 script {
+                    def jobForStep = [
+                        'P1': 'p1-bq-to-gcs',
+                        'P2': 'p2-gcs-to-cloudsql',
+                        'P3': 'p3-cloudsql-to-gcs',
+                        'P4': 'p4-gcs-to-bq'
+                    ]
+                    def steps = params.PIPELINES_TO_RUN.toUpperCase().split(',').collect { it.trim() }.findAll { it }
+                    if (steps.isEmpty()) {
+                        error('PIPELINES_TO_RUN must list at least one of: P1, P2, P3, P4')
+                    }
+                    for (s in steps) {
+                        if (!jobForStep.containsKey(s)) {
+                            error("Unknown step '${s}'. Use only P1, P2, P3, P4")
+                        }
+                    }
+
                     def ids = params.WORKLOAD_IDS.split(',').collect { it.trim() }.findAll { it }
                     if (ids.isEmpty()) {
                         error('WORKLOAD_IDS must list at least one workload id')
                     }
+
                     def branches = [:]
                     for (id in ids) {
                         def wid = id
                         branches["chain-${wid}"] = {
-                            echo "Starting chain for workload=${wid}"
-                            build job: 'p1-bq-to-gcs', wait: true, parameters: [
-                                string(name: 'WORKLOAD_ID', value: wid)
-                            ]
-                            build job: 'p2-gcs-to-cloudsql', wait: true, parameters: [
-                                string(name: 'WORKLOAD_ID', value: wid)
-                            ]
-                            build job: 'p3-cloudsql-to-gcs', wait: true, parameters: [
-                                string(name: 'WORKLOAD_ID', value: wid)
-                            ]
-                            build job: 'p4-gcs-to-bq', wait: true, parameters: [
-                                string(name: 'WORKLOAD_ID', value: wid)
-                            ]
+                            echo "Chain workload=${wid} steps=${steps.join(' -> ')}"
+                            for (step in steps) {
+                                echo "Running ${step} (${jobForStep[step]}) for workload=${wid}"
+                                build job: jobForStep[step], wait: true, parameters: [
+                                    string(name: 'WORKLOAD_ID', value: wid)
+                                ]
+                            }
                             echo "Finished chain for workload=${wid}"
                         }
                     }
@@ -46,7 +62,7 @@ pipeline {
         }
     }
     post {
-        success { echo "All parallel chains finished: ${params.WORKLOAD_IDS}" }
+        success { echo "Orchestrator done. Workloads=${params.WORKLOAD_IDS} Steps=${params.PIPELINES_TO_RUN}" }
         failure { echo 'Parallel orchestrator FAILED (one or more chains failed)' }
     }
 }
