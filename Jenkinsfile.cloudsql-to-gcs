@@ -7,6 +7,10 @@ pipeline {
         string(name: 'WORKLOAD_ID', defaultValue: 'default', description: 'Must match Pipeline 1 and 2 WORKLOAD_ID for the same data chain.')
     }
 
+    environment {
+        WORKLOAD_ID = "${params.WORKLOAD_ID ?: 'default'}"
+    }
+
     stages {
         stage('Authenticate GCP') {
             steps {
@@ -71,7 +75,7 @@ fi
         }
     }
     post {
-        success { echo "P3 done: Cloud SQL to GCS (workload=${params.WORKLOAD_ID})" }
-        failure { echo "P3 FAILED (workload=${params.WORKLOAD_ID})" }
+        success { echo "P3 done: Cloud SQL to GCS (workload=${env.WORKLOAD_ID})" }
+        failure { echo "P3 FAILED (workload=${env.WORKLOAD_ID})" }
     }
 }

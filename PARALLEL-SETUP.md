@@ -2,6 +2,16 @@
 
 Run **multiple independent data chains at the same time** by giving each chain a unique `WORKLOAD_ID`.
 
+## After upgrading Jenkinsfiles (important)
+
+1. **Push** the latest repo to GitHub.
+2. On **each** job (`p1-bq-to-gcs` … `p4-gcs-to-bq`), use **Build with Parameters** — not plain **Build Now** on the first run after the upgrade.
+3. Set **`WORKLOAD_ID`** = **`default`** to keep the same behavior as before (flat `bq-exports/`, table `target_table`).
+4. Run **one successful build per job** with `default` before using the parallel orchestrator or new workload ids.
+5. In job **Configure**, remove any **Parameters** you added manually in the UI (let the Jenkinsfile define them).
+
+If builds fail with empty workload paths, pull the commit that adds the `environment { WORKLOAD_ID = ... }` block.
+
 ## How it works
 
 | `WORKLOAD_ID` | GCS paths | MySQL table | Still uses credentials |

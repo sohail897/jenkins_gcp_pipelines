@@ -8,6 +8,11 @@ pipeline {
         string(name: 'OVERRIDE_DEST_TABLE', defaultValue: '', description: 'Optional BigQuery destination table id (overrides bq-table-dest credential when set).')
     }
 
+    environment {
+        WORKLOAD_ID = "${params.WORKLOAD_ID ?: 'default'}"
+        OVERRIDE_DEST_TABLE = "${params.OVERRIDE_DEST_TABLE ?: ''}"
+    }
+
     stages {
         stage('Authenticate GCP') {
             steps {
@@ -65,7 +70,7 @@ bq show --format=prettyjson "${BQ_PROJECT}:${BQ_DATASET}.${DEST_TABLE}" | grep -
         }
     }
     post {
-        success { echo "P4 done: GCS to BigQuery (workload=${params.WORKLOAD_ID})" }
-        failure { echo "P4 FAILED (workload=${params.WORKLOAD_ID})" }
+        success { echo "P4 done: GCS to BigQuery (workload=${env.WORKLOAD_ID})" }
+        failure { echo "P4 FAILED (workload=${env.WORKLOAD_ID})" }
     }
 }

@@ -6,6 +6,11 @@ pipeline {
         string(name: 'OVERRIDE_SOURCE_TABLE', defaultValue: '', description: 'Optional BigQuery source table id (overrides bq-table-source credential when set).')
     }
 
+    environment {
+        WORKLOAD_ID = "${params.WORKLOAD_ID ?: 'default'}"
+        OVERRIDE_SOURCE_TABLE = "${params.OVERRIDE_SOURCE_TABLE ?: ''}"
+    }
+
     stages {
         stage('Authenticate') {
             steps {
@@ -66,7 +71,7 @@ fi
         }
     }
     post {
-        success { echo "P1 done: BigQuery to GCS (workload=${params.WORKLOAD_ID})" }
-        failure { echo "P1 FAILED (workload=${params.WORKLOAD_ID})" }
+        success { echo "P1 done: BigQuery to GCS (workload=${env.WORKLOAD_ID})" }
+        failure { echo "P1 FAILED (workload=${env.WORKLOAD_ID})" }
     }
 }
