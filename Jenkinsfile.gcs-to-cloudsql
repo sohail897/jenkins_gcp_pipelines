@@ -43,7 +43,14 @@ echo "P2 input: $LATEST"
             steps {
                 sh '''#!/bin/bash
 set -euo pipefail
-python3 -c "import pandas as pd,sys; df=pd.read_csv(\"/tmp/input_${WORKLOAD_ID}.csv\"); print(df.shape); sys.exit(1 if df.empty or df.iloc[:,0].isnull().any() else 0)"
+python3 <<PY
+import pandas as pd
+import sys
+
+df = pd.read_csv("/tmp/input_${WORKLOAD_ID}.csv")
+print(df.shape)
+sys.exit(1 if df.empty or df.iloc[:, 0].isnull().any() else 0)
+PY
 '''
             }
         }
