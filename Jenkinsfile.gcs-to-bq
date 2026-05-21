@@ -1,8 +1,12 @@
-// Pipeline 4: latest sql-exports/*.csv to BigQuery destination table (bq-table-dest).
-// Pipeline 4 is blocked until Pipeline 3 has produced at least one sql-exports CSV object.
+// Pipeline 4: GCS sql-exports -> BigQuery dest. Run Pipeline 3 for the same WORKLOAD_ID first.
 
 pipeline {
     agent { label 'gcp-slave' }
+
+    parameters {
+        string(name: 'WORKLOAD_ID', defaultValue: 'default', description: 'Must match Pipeline 1-3 WORKLOAD_ID for the same data chain.')
+        string(name: 'OVERRIDE_DEST_TABLE', defaultValue: '', description: 'Optional BigQuery destination table id (overrides bq-table-dest credential when set).')
+    }
 
     stages {
         stage('Authenticate GCP') {
@@ -15,13 +19,20 @@ pipeline {
 
         stage('Identify latest export') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET')]) {
                     sh '''#!/bin/bash
 set -euo pipefail
 gcloud auth activate-service-account --key-file=$GCP_SA_KEY
-LATEST=$(gsutil ls gs://$GCS_BUCKET/sql-exports/*.csv 2>/dev/null | tail -n1 || true)
-test -n "$LATEST" || { echo "Run Pipeline 3 first: no sql-exports CSV"; exit 2; }
-echo "$LATEST" > /tmp/gcs_latest_uri.txt
+if [ "$WORKLOAD_ID" = "default" ]; then
+  DEST_DIR="gs://${GCS_BUCKET}/sql-exports"
+  LATEST=$(gsutil ls "${DEST_DIR}"/*.csv 2>/dev/null | tail -n1 || true)
+else
+  DEST_DIR="gs://${GCS_BUCKET}/sql-exports/${WORKLOAD_ID}"
+  LATEST=$(gsutil cat "${DEST_DIR}/LATEST" 2>/dev/null || true)
+fi
+test -n "$LATEST" || { echo "Run Pipeline 3 first for workload ${WORKLOAD_ID}: no sql-exports CSV"; exit 2; }
+echo -n "$LATEST" > "/tmp/gcs_latest_uri_${WORKLOAD_ID}.txt"
+echo "P4 input: $LATEST"
 '''
                 }
             }
@@ -29,26 +40,32 @@ echo "$LATEST" > /tmp/gcs_latest_uri.txt
 
         stage('Load CSV into BigQuery') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
-                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && LATEST=$(cat /tmp/gcs_latest_uri.txt) && bq load --autodetect --source_format=CSV ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_DEST} "$LATEST"'
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+gcloud auth activate-service-account --key-file=$GCP_SA_KEY
+DEST_TABLE="${OVERRIDE_DEST_TABLE:-$BQ_TABLE_DEST}"
+LATEST=$(cat "/tmp/gcs_latest_uri_${WORKLOAD_ID}.txt")
+bq load --autodetect --source_format=CSV "${BQ_PROJECT}:${BQ_DATASET}.${DEST_TABLE}" "$LATEST"
+'''
                 }
             }
         }
 
         stage('Verify BigQuery') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
-                    sh 'bq show --format=prettyjson ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_DEST} | grep -E "\"numRows\"|\"type\"|\"tableReference\""'
+                withCredentials([string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'), string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'), string(credentialsId: 'bq-table-dest', variable: 'BQ_TABLE_DEST')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+DEST_TABLE="${OVERRIDE_DEST_TABLE:-$BQ_TABLE_DEST}"
+bq show --format=prettyjson "${BQ_PROJECT}:${BQ_DATASET}.${DEST_TABLE}" | grep -E '"numRows"|"type"|"tableReference"'
+'''
                 }
             }
         }
-
-
-
-
     }
     post {
-        success { echo 'P4 done: GCS to BigQuery' }
-        failure { echo 'P4 FAILED' }
+        success { echo "P4 done: GCS to BigQuery (workload=${params.WORKLOAD_ID})" }
+        failure { echo "P4 FAILED (workload=${params.WORKLOAD_ID})" }
     }
 }

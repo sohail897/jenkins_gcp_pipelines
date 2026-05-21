@@ -1,8 +1,11 @@
-// Pipeline 3: Cloud SQL (target_table) to GCS prefix sql-exports/ (feeds Pipeline 4).
-// Run Pipeline 2 first so target_table contains the rows you intend to export.
+// Pipeline 3: Cloud SQL to GCS (sql-exports/). Run Pipeline 2 for the same WORKLOAD_ID first.
 
 pipeline {
     agent { label 'gcp-slave' }
+
+    parameters {
+        string(name: 'WORKLOAD_ID', defaultValue: 'default', description: 'Must match Pipeline 1 and 2 WORKLOAD_ID for the same data chain.')
+    }
 
     stages {
         stage('Authenticate GCP') {
@@ -15,34 +18,60 @@ pipeline {
 
         stage('Export Cloud SQL to CSV') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'python3 scripts/export_sql_to_csv.py --host "$CSQL_H" --db "$CSQL_D" --user "$CSQL_U" --password "$CSQL_P" --table target_table --output /tmp/cloudsql_export.csv'
+                withCredentials([string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+if [ "$WORKLOAD_ID" = "default" ]; then
+  SQL_TABLE="target_table"
+else
+  SQL_TABLE="target_${WORKLOAD_ID}"
+fi
+python3 scripts/export_sql_to_csv.py \
+  --host "$CSQL_H" --db "$CSQL_D" --user "$CSQL_U" --password "$CSQL_P" \
+  --table "$SQL_TABLE" --output "/tmp/cloudsql_export_${WORKLOAD_ID}.csv"
+'''
                 }
             }
         }
 
         stage('Upload to GCS') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && gsutil cp /tmp/cloudsql_export.csv gs://${GCS_BUCKET}/sql-exports/export_$(date +%Y%m%d_%H%M%S).csv'
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+gcloud auth activate-service-account --key-file=$GCP_SA_KEY
+if [ "$WORKLOAD_ID" = "default" ]; then
+  DEST_DIR="gs://${GCS_BUCKET}/sql-exports"
+else
+  DEST_DIR="gs://${GCS_BUCKET}/sql-exports/${WORKLOAD_ID}"
+fi
+EXPORT_URI="${DEST_DIR}/export_$(date +%Y%m%d_%H%M%S).csv"
+gsutil cp "/tmp/cloudsql_export_${WORKLOAD_ID}.csv" "$EXPORT_URI"
+echo -n "$EXPORT_URI" | gsutil cp - "${DEST_DIR}/LATEST"
+echo "P3 export: $EXPORT_URI"
+'''
                 }
             }
         }
 
         stage('Verify GCS upload') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && gsutil ls -l gs://${GCS_BUCKET}/sql-exports/'
+                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+gcloud auth activate-service-account --key-file=$GCP_SA_KEY
+if [ "$WORKLOAD_ID" = "default" ]; then
+  gsutil ls -l "gs://${GCS_BUCKET}/sql-exports/"
+else
+  gsutil ls -l "gs://${GCS_BUCKET}/sql-exports/${WORKLOAD_ID}/"
+fi
+'''
                 }
             }
         }
-
-
-
-
     }
     post {
-        success { echo 'P3 done: Cloud SQL to GCS' }
-        failure { echo 'P3 FAILED' }
+        success { echo "P3 done: Cloud SQL to GCS (workload=${params.WORKLOAD_ID})" }
+        failure { echo "P3 FAILED (workload=${params.WORKLOAD_ID})" }
     }
 }

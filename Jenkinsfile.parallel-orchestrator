@@ -1,0 +1,52 @@
+// Run multiple isolated P1->P2->P3->P4 chains in parallel (one WORKLOAD_ID per chain).
+// Requires Pipeline: Build Step plugin and jobs: p1-bq-to-gcs, p2-gcs-to-cloudsql, p3-cloudsql-to-gcs, p4-gcs-to-bq
+
+pipeline {
+    agent none
+
+    parameters {
+        string(
+            name: 'WORKLOAD_IDS',
+            defaultValue: 'customers,orders',
+            description: 'Comma-separated workload IDs (letters, numbers, underscore). Each runs P1->P4 in parallel.'
+        )
+    }
+
+    stages {
+        stage('Parallel data chains') {
+            steps {
+                script {
+                    def ids = params.WORKLOAD_IDS.split(',').collect { it.trim() }.findAll { it }
+                    if (ids.isEmpty()) {
+                        error('WORKLOAD_IDS must list at least one workload id')
+                    }
+                    def branches = [:]
+                    for (id in ids) {
+                        def wid = id
+                        branches["chain-${wid}"] = {
+                            echo "Starting chain for workload=${wid}"
+                            build job: 'p1-bq-to-gcs', wait: true, parameters: [
+                                string(name: 'WORKLOAD_ID', value: wid)
+                            ]
+                            build job: 'p2-gcs-to-cloudsql', wait: true, parameters: [
+                                string(name: 'WORKLOAD_ID', value: wid)
+                            ]
+                            build job: 'p3-cloudsql-to-gcs', wait: true, parameters: [
+                                string(name: 'WORKLOAD_ID', value: wid)
+                            ]
+                            build job: 'p4-gcs-to-bq', wait: true, parameters: [
+                                string(name: 'WORKLOAD_ID', value: wid)
+                            ]
+                            echo "Finished chain for workload=${wid}"
+                        }
+                    }
+                    parallel branches
+                }
+            }
+        }
+    }
+    post {
+        success { echo "All parallel chains finished: ${params.WORKLOAD_IDS}" }
+        failure { echo 'Parallel orchestrator FAILED (one or more chains failed)' }
+    }
+}

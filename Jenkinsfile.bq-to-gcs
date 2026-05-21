@@ -1,5 +1,11 @@
 pipeline {
     agent { label 'gcp-slave' }
+
+    parameters {
+        string(name: 'WORKLOAD_ID', defaultValue: 'default', description: 'Isolated GCS folder and downstream SQL table. Use "default" for original flat bq-exports/ layout.')
+        string(name: 'OVERRIDE_SOURCE_TABLE', defaultValue: '', description: 'Optional BigQuery source table id (overrides bq-table-source credential when set).')
+    }
+
     stages {
         stage('Authenticate') {
             steps {
@@ -23,7 +29,20 @@ pipeline {
                     string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'),
                     string(credentialsId: 'bq-table-source', variable: 'BQ_TABLE_SOURCE')
                 ]) {
-                    sh 'bq extract --destination_format CSV ${BQ_PROJECT}:${BQ_DATASET}.${BQ_TABLE_SOURCE} gs://${GCS_BUCKET}/bq-exports/export_$(date +%Y%m%d_%H%M%S).csv'
+                    sh '''#!/bin/bash
+set -euo pipefail
+gcloud auth activate-service-account --key-file=$GCP_SA_KEY
+SRC_TABLE="${OVERRIDE_SOURCE_TABLE:-$BQ_TABLE_SOURCE}"
+if [ "$WORKLOAD_ID" = "default" ]; then
+  DEST_DIR="gs://${GCS_BUCKET}/bq-exports"
+else
+  DEST_DIR="gs://${GCS_BUCKET}/bq-exports/${WORKLOAD_ID}"
+fi
+EXPORT_URI="${DEST_DIR}/export_$(date +%Y%m%d_%H%M%S).csv"
+bq extract --destination_format CSV "${BQ_PROJECT}:${BQ_DATASET}.${SRC_TABLE}" "$EXPORT_URI"
+echo -n "$EXPORT_URI" | gsutil cp - "${DEST_DIR}/LATEST"
+echo "P1 export: $EXPORT_URI"
+'''
                 }
             }
         }
@@ -31,18 +50,23 @@ pipeline {
             steps {
                 withCredentials([
                     file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'),
-                    string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'),
-                    string(credentialsId: 'bq-project-id', variable: 'BQ_PROJECT'),
-                    string(credentialsId: 'bq-dataset', variable: 'BQ_DATASET'),
-                    string(credentialsId: 'bq-table-source', variable: 'BQ_TABLE_SOURCE')
+                    string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET')
                 ]) {
-                    sh 'gcloud auth activate-service-account --key-file=$GCP_SA_KEY && gsutil ls -l gs://${GCS_BUCKET}/bq-exports/'
+                    sh '''#!/bin/bash
+set -euo pipefail
+gcloud auth activate-service-account --key-file=$GCP_SA_KEY
+if [ "$WORKLOAD_ID" = "default" ]; then
+  gsutil ls -l "gs://${GCS_BUCKET}/bq-exports/"
+else
+  gsutil ls -l "gs://${GCS_BUCKET}/bq-exports/${WORKLOAD_ID}/"
+fi
+'''
                 }
             }
         }
     }
     post {
-        success { echo 'P1 done: BigQuery to GCS' }
-        failure { echo 'P1 FAILED' }
+        success { echo "P1 done: BigQuery to GCS (workload=${params.WORKLOAD_ID})" }
+        failure { echo "P1 FAILED (workload=${params.WORKLOAD_ID})" }
     }
 }

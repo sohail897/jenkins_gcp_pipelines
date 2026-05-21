@@ -1,5 +1,10 @@
 pipeline {
     agent { label 'gcp-slave' }
+
+    parameters {
+        string(name: 'WORKLOAD_ID', defaultValue: 'default', description: 'Must match Pipeline 1 WORKLOAD_ID for the same data chain.')
+    }
+
     stages {
         stage('Authenticate GCP') {
             steps {
@@ -15,9 +20,16 @@ pipeline {
                     sh '''#!/bin/bash
 set -euo pipefail
 gcloud auth activate-service-account --key-file=$GCP_SA_KEY
-LATEST=$(gsutil ls gs://$GCS_BUCKET/bq-exports/*.csv 2>/dev/null | tail -n1 || true)
-test -n "$LATEST" || { echo "Run Pipeline 1 first: no bq-exports CSV"; exit 2; }
-gsutil cp "$LATEST" /tmp/input.csv
+if [ "$WORKLOAD_ID" = "default" ]; then
+  DEST_DIR="gs://${GCS_BUCKET}/bq-exports"
+  LATEST=$(gsutil ls "${DEST_DIR}"/*.csv 2>/dev/null | tail -n1 || true)
+else
+  DEST_DIR="gs://${GCS_BUCKET}/bq-exports/${WORKLOAD_ID}"
+  LATEST=$(gsutil cat "${DEST_DIR}/LATEST" 2>/dev/null || true)
+fi
+test -n "$LATEST" || { echo "Run Pipeline 1 first for workload ${WORKLOAD_ID}: no bq-exports CSV"; exit 2; }
+gsutil cp "$LATEST" "/tmp/input_${WORKLOAD_ID}.csv"
+echo "P2 input: $LATEST"
 '''
                 }
             }
@@ -25,30 +37,47 @@ gsutil cp "$LATEST" /tmp/input.csv
 
         stage('Validate CSV') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'python3 -c "import pandas as pd,sys; df=pd.read_csv(\\"/tmp/input.csv\\"); print(df.shape); sys.exit(1 if df.empty or df.iloc[:,0].isnull().any() else 0)"'
-                }
+                sh 'python3 -c "import pandas as pd,sys; df=pd.read_csv(\\"/tmp/input_${WORKLOAD_ID}.csv\\"); print(df.shape); sys.exit(1 if df.empty or df.iloc[:,0].isnull().any() else 0)"'
             }
         }
 
         stage('Load to Cloud SQL') {
             steps {
                 withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'python3 scripts/load_gcs_to_sql.py --csv-file /tmp/input.csv --host "$CSQL_H" --db "$CSQL_D" --user "$CSQL_U" --password "$CSQL_P" --table target_table --chunk-size 500'
+                    sh '''#!/bin/bash
+set -euo pipefail
+if [ "$WORKLOAD_ID" = "default" ]; then
+  SQL_TABLE="target_table"
+else
+  SQL_TABLE="target_${WORKLOAD_ID}"
+fi
+python3 scripts/load_gcs_to_sql.py \
+  --csv-file "/tmp/input_${WORKLOAD_ID}.csv" \
+  --host "$CSQL_H" --db "$CSQL_D" --user "$CSQL_U" --password "$CSQL_P" \
+  --table "$SQL_TABLE" --chunk-size 500
+'''
                 }
             }
         }
 
         stage('Verify Cloud SQL') {
             steps {
-                withCredentials([file(credentialsId: 'gcp-sa-key', variable: 'GCP_SA_KEY'), string(credentialsId: 'gcs-bucket-name', variable: 'GCS_BUCKET'), string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
-                    sh 'MYSQL_PWD="$CSQL_P" mysql -h "$CSQL_H" -u "$CSQL_U" "$CSQL_D" -e "SELECT COUNT(*) AS row_count FROM target_table"'
+                withCredentials([string(credentialsId: 'cloudsql-host', variable: 'CSQL_H'), string(credentialsId: 'cloudsql-db', variable: 'CSQL_D'), string(credentialsId: 'cloudsql-user', variable: 'CSQL_U'), string(credentialsId: 'cloudsql-pass', variable: 'CSQL_P')]) {
+                    sh '''#!/bin/bash
+set -euo pipefail
+if [ "$WORKLOAD_ID" = "default" ]; then
+  SQL_TABLE="target_table"
+else
+  SQL_TABLE="target_${WORKLOAD_ID}"
+fi
+MYSQL_PWD="$CSQL_P" mysql -h "$CSQL_H" -u "$CSQL_U" "$CSQL_D" -e "SELECT COUNT(*) AS row_count FROM ${SQL_TABLE}"
+'''
                 }
             }
         }
     }
     post {
-        success { echo 'P2 done: GCS to Cloud SQL' }
-        failure { echo 'P2 FAILED' }
+        success { echo "P2 done: GCS to Cloud SQL (workload=${params.WORKLOAD_ID})" }
+        failure { echo "P2 FAILED (workload=${params.WORKLOAD_ID})" }
     }
 }
